@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chatbot - Fase 2 - Segunda Guerra Mundial</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <!-- header -->
+  <header>
+    <div class="header-inner">
+      <div>
+        <h1>Chatbot - Fase 2 - Segunda Guerra Mundial</h1>
+      </div>
+      <div id="status-dot" class="dot dot-checking" title="Verificando modelo..."></div>
+    </div>
+  </header>
+
+  <!-- contenido principal -->
+  <main>
+
+    <!-- mensaje de bienvenida -->
+    <div id="welcome" class="welcome-box">
+      <p>Puedes preguntarme sobre:</p>
+      <ul>
+        <li><strong>Causas</strong> de la guerra</li>
+        <li><strong>Aliados y Eje</strong> - paises y lideres</li>
+        <li><strong>Batallas</strong> - Stalingrado, Normandia, Midway</li>
+        <li><strong>Frentes</strong> occidental y oriental</li>
+        <li><strong>Guerra del Pacifico</strong></li>
+        <li><strong>Consecuencias</strong> de la guerra</li>
+        <li><strong>Terminos y conceptos</strong> del glosario</li>
+      </ul>
+    </div>
+
+    <!-- ventana de chat -->
+    <div id="chat-window"></div>
+
+  </main>
+
+  <!-- barra de input fija abajo -->
+  <footer>
+    <div class="footer-inner">
+      <button id="clear-btn" title="Limpiar conversacion">x</button>
+      <textarea
+        id="user-input"
+        rows="1"
+        placeholder="Escribe tu pregunta sobre la Segunda Guerra Mundial..."
+      ></textarea>
+      <button id="send-btn" title="Enviar">&#9658;</button>
+    </div>
+  </footer>
+
+  <script>
+    // historial de mensajes
+    let history = [];
+
+    // referencias al DOM
+    const chatWindow = document.getElementById("chat-window");
+    const userInput  = document.getElementById("user-input");
+    const sendBtn    = document.getElementById("send-btn");
+    const clearBtn   = document.getElementById("clear-btn");
+    const statusDot  = document.getElementById("status-dot");
+    const welcome    = document.getElementById("welcome");
+
+    // verifica si el modelo esta disponible al cargar
+    async function checkHealth() {
+      try {
+        const res  = await fetch("/api/health");
+        const data = await res.json();
+        if (data.model_ready) {
+          statusDot.className = "dot dot-ok";
+          statusDot.title     = `Modelo ${data.model} listo`;
+        } else {
+          statusDot.className = "dot dot-warn";
+          statusDot.title     = `Modelo no encontrado. Ejecuta: ollama pull ${data.model}`;
+        }
+      } catch {
+        statusDot.className = "dot dot-error";
+        statusDot.title     = "No se pudo conectar con Ollama";
+      }
+    }
+    checkHealth();
+
+    // crea y agrega una burbuja al chat
+    function addBubble(role, text) {
+      if (welcome.style.display !== "none") welcome.style.display = "none";
+
+      const wrap = document.createElement("div");
+      wrap.className = `bubble-wrap ${role}`;
+
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = role === "user" ? "U" : "B";
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      // convierte saltos de linea y negrita basica de markdown
+      bubble.innerHTML = escapeHtml(text)
+        .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+        .replace(/\n/g, "<br>");
+
+      if (role === "user") {
+        wrap.appendChild(bubble);
+        wrap.appendChild(avatar);
+      } else {
+        wrap.appendChild(avatar);
+        wrap.appendChild(bubble);
+      }
+
+      chatWindow.appendChild(wrap);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+      return bubble;
+    }
+
+    // indicador de escritura mientras espera respuesta
+    function addTyping() {
+      const wrap = document.createElement("div");
+      wrap.className = "bubble-wrap assistant";
+      wrap.id = "typing-indicator";
+
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = "B";
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble typing";
+      bubble.innerHTML = "<span></span><span></span><span></span>";
+
+      wrap.appendChild(avatar);
+      wrap.appendChild(bubble);
+      chatWindow.appendChild(wrap);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    function removeTyping() {
+      const el = document.getElementById("typing-indicator");
+      if (el) el.remove();
+    }
+
+    function escapeHtml(text) {
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    // envia el mensaje al backend
+    async function sendMessage() {
+      const text = userInput.value.trim();
+      if (!text) return;
+
+      userInput.value = "";
+      userInput.style.height = "auto";
+      sendBtn.disabled = true;
+
+      addBubble("user", text);
+      addTyping();
+
+      try {
+        const res  = await fetch("/api/chat", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ message: text, history })
+        });
+        const data = await res.json();
+        removeTyping();
+
+        if (data.error) {
+          addBubble("assistant", `Error: ${data.error}\n\nAsegurate de que Ollama este corriendo y el modelo descargado.`);
+        } else {
+          addBubble("assistant", data.answer);
+          history.push({ role: "user",      content: text });
+          history.push({ role: "assistant", content: data.answer });
+          // mantiene solo las ultimas 12 entradas
+          if (history.length > 12) history = history.slice(-12);
+        }
+      } catch (err) {
+        removeTyping();
+        addBubble("assistant", `No se pudo conectar con el servidor.\n\n${err}`);
+      }
+
+      sendBtn.disabled = false;
+      userInput.focus();
+    }
+
+    // limpiar conversacion
+    clearBtn.addEventListener("click", () => {
+      history = [];
+      chatWindow.innerHTML = "";
+      welcome.style.display = "";
+    });
+
+    // eventos del input
+    sendBtn.addEventListener("click", sendMessage);
+
+    userInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    // auto-resize del textarea segun el contenido
+    userInput.addEventListener("input", () => {
+      userInput.style.height = "auto";
+      userInput.style.height = Math.min(userInput.scrollHeight, 120) + "px";
+    });
+  </script>
+</body>
+</html>

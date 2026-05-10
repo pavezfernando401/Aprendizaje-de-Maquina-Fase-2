@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# entorno virtual
+venv/
+env/
+.venv/
+
+# carpetas que no van al repo
+evaluation/
+
+# misc
+.DS_Store
+*.log
